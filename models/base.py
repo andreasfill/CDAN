@@ -3,23 +3,49 @@ import time
 from abc import abstractmethod
 
 import torch
+from os import path
+from torch.utils.data import DataLoader, Dataset
 
 
 class BaseModel():
-    def __init__(self, config, dataloader):
+    # def __init__(self, config, dataloader):
+    #     """init model with basic input, which are from __init__(**kwargs) function in inherited class."""
+    #     self.config = config
+    #     self.phase = config['phase']
+    #     self.device = config[self.phase]['device']
+    #     self.batch_size = config[self.phase]['dataloader']["args"]['batch_size']
+    #     self.epoch = config['train']['n_epoch']
+    #     self.lr = config['train']['lr']
+    #     self.is_dataset_paired = config['test']['dataset']['is_paired']
+    #     self.dataloader = dataloader
+    #     self.apply_post_processing = config['test']['apply_post_processing']
+    #     self.model_path = config[self.phase]['model_path']
+    #     self.model_name = config[self.phase]['model_name']
+    #     self.output_images_path = config['test']['output_images_path']
+    def __init__(
+        self,
+        train_phase: bool, 
+        device: str,
+        is_dataset_paired: bool,
+        dataloader: DataLoader,
+        apply_post_processing: bool,
+        output_images_path: path,
+        epoch: int,
+        learning_rate: float,
+        dataset: Dataset
+    ):
         """init model with basic input, which are from __init__(**kwargs) function in inherited class."""
-        self.config = config
-        self.phase = config['phase']
-        self.device = config[self.phase]['device']
-        self.batch_size = config[self.phase]['dataloader']["args"]['batch_size']
-        self.epoch = config['train']['n_epoch']
-        self.lr = config['train']['lr']
-        self.is_dataset_paired = config['test']['dataset']['is_paired']
-        self.dataloader = dataloader
-        self.apply_post_processing = config['test']['apply_post_processing']
-        self.model_path = config[self.phase]['model_path']
-        self.model_name = config[self.phase]['model_name']
-        self.output_images_path = config['test']['output_images_path']
+        self.phase: str = "train" if train_phase else "test"
+        self.device: str = device
+        self.is_dataset_paired: bool = is_dataset_paired
+        self.dataloader: DataLoader = dataloader
+        self.apply_post_processing: bool = apply_post_processing
+        self.output_images_path: path = output_images_path
+        self.epoch: int = epoch
+        self.lr: float = learning_rate
+        # Use dataset to access image and patch size for the 'generate_output_images', so they don't
+        # have to be defined there again.
+        self.dataset: Dataset = dataset
 
     def train(self):
         since = time.time()        
