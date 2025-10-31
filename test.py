@@ -4,22 +4,25 @@ from utils.parser import create_model, define_dataloader, define_network, define
 from utils.reproducibility import set_seed_and_cudnn
 from torch.utils.data import Dataset, DataLoader
 from typing import Iterable, Tuple
-from torch import Tensor, load
+from torch import Tensor, load, from_numpy, float32, uint8
 from torchvision import transforms
 from os.path import join
 from os import listdir, getcwd
 from PIL import Image
-from einops import rearrange
+from einops import rearrange, repeat
 import matplotlib.pyplot as plt
 from models.cdan import CDAN
 from models.model import Model
 import cv2 as cv
+import numpy as np
 
 class DLRDataset(Dataset):
     def __init__(
         self,
         strip: str,
-        create_patches: bool):
+        create_patches: bool,
+        hsv: bool
+    ):
         super().__init__()
         self.image_height: int = 6144 
         self.image_width: int = 8192
@@ -31,6 +34,7 @@ class DLRDataset(Dataset):
         self.total_num_patches: int = self.num_horizontal_patches * self.num_vertical_patches
         print(f"Height: {self.image_height}, Width: {self.image_width}, Patch Size: {self.patch_size}, Vertical Patches: {self.num_vertical_patches}, Horizontal Patches: {self.num_horizontal_patches}, Total number of Patches: {self.total_num_patches}")
         self.create_patches: bool = create_patches
+        self.hsv: bool = hsv
         
         low_light_root = join(getcwd(), "images", strip)
         # self.low_light_dataset = [join(low_light_root, image) for image in listdir(low_light_root)]
@@ -57,10 +61,18 @@ class DLRDataset(Dataset):
         # low_light = Image.open(self.low_light_dataset[idx]).convert('RGB')
         low_light = cv.imread(self.low_light_dataset[idx], cv.IMREAD_COLOR_RGB)
         # Why does opencv load the image as HWC, but resizing takes the format WH???
-        low_light = cv.resize(low_light, (self.image_width, self.image_height))
+        if self.create_patches:
+            low_light = cv.resize(low_light, (self.image_width, self.image_height))
 
         # TODO: Do the same for the astronaut or other pictures and check if their RGB channels
         # are very different before and after enhancement.
+        # TODO: Check weights of the kernels for the last layer to see if they are very similar
+        # for the red, green and blue channel.
+        # TODO: DONE: Make histogram of each color channel with before and after. Calculate distance metrics
+        # of both histograms (min, max, average, standard deviation). Visualize difference in pixel intensity
+        # for each color channel between input and enhanced image.
+        # TODO: Try it without postprocessing.
+        # TODO: NOTE: DONE. Convert image to HSV and use V-channel 3 times as input.
         fig, sp = plt.subplots(nrows=1, ncols=3, figsize=((30, 10)), layout="constrained")
         for i, color_channel in enumerate(["Red", "Green", "Blue"]):
             color_bar = sp[i].imshow(low_light[:, :, i], cmap="viridis", vmin=0, vmax=255)
@@ -71,12 +83,24 @@ class DLRDataset(Dataset):
         save_dir = join(getcwd(), "images", "strip1", "output")
         plt.savefig(join(save_dir, f"{self.patch_size}_OriginalColorChannels_{image_name}"))
 
-        low_light = self.transforms(low_light)
+        if self.hsv:
+            low_light = cv.cvtColor(low_light, cv.COLOR_RGB2HSV)
+            low_light = low_light.astype(np.float32)
+            low_light[..., 0] /= 179.0
+            low_light[..., 1:] /= 255.0
+            hsv_image = low_light.copy()
+            low_light = low_light[..., 2]
+            low_light = from_numpy(low_light)
+            low_light = repeat(low_light, "h w -> c h w", c=3)
+            
+        else:
+            low_light = self.transforms(low_light)
+            hsv_image = -1
 
         if self.create_patches:
             low_light = rearrange(low_light, "c (b1 h) (b2 w) -> (b1 b2) c h w", b1=self.num_vertical_patches, b2=self.num_horizontal_patches, h=self.patch_size, w=self.patch_size)
 
-        return image_name, low_light
+        return image_name, low_light, hsv_image
 
     def __len__(self) -> int:
         return len(self.low_light_dataset)
@@ -86,7 +110,7 @@ def main():
 
     # phase = config['phase']
     strip: str = "strip1"
-    dataset: DLRDataset = DLRDataset(strip=strip, create_patches=True)
+    dataset: DLRDataset = DLRDataset(strip=strip, create_patches=True, hsv=True)
     dataloader: Iterable[Tensor] = DataLoader(dataset, batch_size=1, shuffle=False)
     network: CDAN = CDAN()
     network.load_state_dict(load("CDAN_weights.pt", map_location="cpu", weights_only=True))

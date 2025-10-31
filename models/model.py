@@ -41,7 +41,7 @@ class Model(BaseModel):
 
         return loss + perceptual_loss
     
-    def generate_output_images(self, outputs, names, save_dir):
+    def generate_output_images(self, outputs, names, hsv_images, save_dir):
         """Generates and saves output images to the specified directory."""
         # Turn list of tensors, where each tensor is for one patch (CHW) into a single
         # tensor again (BCHW).
@@ -49,26 +49,47 @@ class Model(BaseModel):
         outputs = rearrange(outputs, "(b1 b2) c h w -> c (b1 h) (b2 w)", b1=self.dataset.num_vertical_patches, b2=self.dataset.num_horizontal_patches, h=self.dataset.patch_size, w=self.dataset.patch_size)
 
         os.makedirs(save_dir, exist_ok=True)
-        # for output_image, image_name in zip(outputs, names):
-        output_image = outputs.detach().cpu().permute(1, 2, 0).numpy()
-        # output_image = outputs.detach().cpu().permute(2, 1, 0).numpy()
-        output_image = (output_image * 255).astype(np.uint8)
-        # output_image = Image.fromarray(output_image)
 
-        output_path = join(save_dir, f"{self.dataset.patch_size}_{names[0]}") 
+        if hsv_images.ndim != 1:
+            print(type(hsv_images))
+            print(hsv_images.shape)
+            output_image = outputs.detach().cpu().permute(1, 2, 0).numpy()
+            output_image = output_image.mean(axis=-1)
+            print(output_image.shape)
+            hsv_images = hsv_images.detach().cpu().numpy()
+            hsv = hsv_images[0]
+            hsv[..., 2] = output_image
+            hsv[..., 0] *= 179.0
+            hsv[..., 1:] *= 255.0
+            hsv = hsv.astype(np.uint8)
+            hsv = cv.cvtColor(hsv, cv.COLOR_HSV2RGB)
 
-        # output_image.save(output_path)
-        cv.imwrite(output_path, output_image) 
+            output_path = join(save_dir, f"{self.dataset.patch_size}_hsv_{names[0]}") 
+            cv.imwrite(output_path, hsv) 
+            
+        else:
+            # for output_image, image_name in zip(outputs, names):
+            output_image = outputs.detach().cpu().permute(1, 2, 0).numpy()
+            # output_image = outputs.detach().cpu().permute(2, 1, 0).numpy()
+            output_image = (output_image * 255).astype(np.uint8)
+            # output_image = Image.fromarray(output_image)
 
-        fig, sp = plt.subplots(nrows=1, ncols=3, figsize=((30, 10)), layout="constrained")
-        for i, color_channel in enumerate(["Red", "Green", "Blue"]):
-            color_bar = sp[i].imshow(output_image[:, :, i], cmap="viridis", vmin=0, vmax=255)
-            sp[i].set_title(f"{color_channel} Color Channel")
-            sp[i].axis("off")
-            fig.colorbar(color_bar, ax=sp[i], shrink=0.65, label="Pixel Intensity")
+            output_path = join(save_dir, f"{self.dataset.patch_size}_{names[0]}") 
 
-        plt.savefig(join(save_dir, f"{self.dataset.patch_size}_ColorChannels_{names[0]}"))
-        
+            # output_image.save(output_path)
+            cv.imwrite(output_path, output_image) 
+
+            fig, sp = plt.subplots(nrows=1, ncols=3, figsize=((30, 10)), layout="constrained")
+            for i, color_channel in enumerate(["Red", "Green", "Blue"]):
+                color_bar = sp[i].imshow(output_image[:, :, i], cmap="viridis", vmin=0, vmax=255)
+                sp[i].set_title(f"{color_channel} Color Channel")
+                sp[i].axis("off")
+                # 'shrink' is used to decrease the height of the color bar to match the height of
+                # the plot itself.
+                fig.colorbar(color_bar, ax=sp[i], shrink=0.65, label="Pixel Intensity")
+
+            plt.savefig(join(save_dir, f"{self.dataset.patch_size}_ColorChannels_{names[0]}"))
+            
         print(f'{len(names)} output images generated and saved to {output_path}')
 
         # os.makedirs(save_dir, exist_ok=True)
@@ -149,7 +170,7 @@ class Model(BaseModel):
                     test_ssim += ssim(outputs, targets)
                     test_lpips += lpips(outputs, targets)
             else:
-                for image_names, inputs in tqdm(self.dataloader, desc='Testing...'):
+                for image_names, inputs, hsv_images in tqdm(self.dataloader, desc='Testing...'):
                     # Remove leading dimension of size 1 added by Pytorch Dataloader.
                     # The number of patches is the batch size.
                     if self.dataset.create_patches:
@@ -164,6 +185,7 @@ class Model(BaseModel):
                         inputs = inputs.to(self.device)
                         outputs = self.network(inputs)
                     names = image_names
+                    hsv = hsv_images
                     break
 
             test_loss = test_loss / len(self.dataloader)
@@ -175,4 +197,4 @@ class Model(BaseModel):
                 print(
                     f'Test Loss: {test_loss:.4f}, Test PSNR: {test_psnr:.4f}, Test SSIM: {test_ssim:.4f}, Test LIPIS: {test_lpips:.4f}')
 
-            self.generate_output_images(outputs, names, self.output_images_path)
+            self.generate_output_images(outputs, names, hsv, self.output_images_path)
